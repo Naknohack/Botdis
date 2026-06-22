@@ -1,0 +1,721 @@
+const {
+    Client, GatewayIntentBits, ActionRowBuilder, EmbedBuilder, ApplicationCommandOptionType,
+    StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+    ModalBuilder, TextInputBuilder, TextInputStyle
+} = require('discord.js');
+const fs = require('fs');
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ]
+});
+
+// ==========================================
+// 1. CƠ SỞ DỮ LIỆU & CONFIG GAME
+// ==========================================
+const DB_FILE = './fishing_db.json';
+let db = { users: {} };
+
+if (fs.existsSync(DB_FILE)) {
+    try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } 
+    catch (err) { console.error('Lỗi đọc DB:', err); }
+}
+
+function saveData() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 4), 'utf8'); }
+
+const ADMIN_ID = '1020868400672686080';
+const PREFIX = '!';
+
+function getUser(userId) {
+    if (!db.users[userId]) {
+        db.users[userId] = {
+            balance: 1000, level: 1, exp: 0, inventory: {}, maxInv: 50, zone: 'Ao Làng',
+            equip: { rod: '🎣 Cần Tre', rodPlus: 0, dur: 10, line: null, hook: null, float: null, reel: null, bait: null },
+            buffs: { luck: 0, drop: 0 },
+            lastDaily: 0, lastChatMoney: 0
+        };
+        saveData();
+    }
+    if(db.users[userId].lastDaily === undefined) db.users[userId].lastDaily = 0;
+    if(db.users[userId].lastChatMoney === undefined) db.users[userId].lastChatMoney = 0;
+    return db.users[userId];
+}
+
+// ------------------------------------------
+// THÔNG SỐ CỬA HÀNG LINH KIỆN
+// ------------------------------------------
+const COMPONENTS = {
+    lines: { 'Dây Cước Thường': 20000, 'Dây Cước Bền': 50000, 'Dây Carbon': 100000, 'Dây Nano': 150000, 'Dây Titan': 500000, 'Dây Thiên Hà': 1000000, 'Dây Hư Không': 2000000, 'Dây Vũ Trụ': 5000000 },
+    hooks: { 'Lưỡi Câu Sắt': 5000, 'Lưỡi Câu Thép': 20000, 'Lưỡi Câu Bạc': 50000, 'Lưỡi Câu Vàng': 100000, 'Lưỡi Câu Titan': 300000, 'Lưỡi Câu Poseidon': 1000000, 'Lưỡi Câu Thần Long': 2000000, 'Lưỡi Câu Sáng Thế': 5000000 },
+    floats: { 'Phao Gỗ': 5000, 'Phao Tre': 10000, 'Phao Nhựa': 10000, 'Phao Carbon': 50000, 'Phao Phát Sáng': 30000, 'Phao Hải Thần': 500000, 'Phao Thiên Hà': 1000000, 'Phao Vũ Trụ': 3000000 },
+    reels: { 'Máy Câu Cũ': 100000, 'Máy Câu Thường': 300000, 'Máy Câu Chuyên Nghiệp': 1000000, 'Máy Câu Carbon': 2000000, 'Máy Câu Titan': 5000000, 'Máy Câu Hải Đế': 10000000, 'Máy Câu Thần Long': 20000000, 'Máy Câu Omega': 50000000 },
+    baits: { 'Trùn Đất': 5000, 'Tôm Nhỏ': 10000, 'Cá Con': 10000, 'Mồi Tổng Hợp': 20000, 'Mồi Phát Sáng': 50000, 'Mồi Đại Dương': 100000, 'Mồi Huyền Thoại': 500000, 'Mồi Thần Biển': 1000000 },
+    buffs: { 'Bùa May Mắn': 500000, 'Thuốc Rớt Đồ': 300000 }
+};
+
+const RODS = {
+    '🎣 Cần Tre': { price: 0, dur: 10, res: 5, req: null },
+    '🎣 Cần Carbon Pro': { price: 5000, dur: 50, res: 15, req: {'Dây Carbon':10, 'Lưỡi Câu Thép':5, 'Máy Câu Cũ':2} },
+    '🎣 Cần Bass Master': { price: 15000, dur: 80, res: 20, req: {'Dây Carbon':15, 'Lưỡi Câu Thép':10, 'Phao Carbon':5} },
+    '🎣 Cần Predator': { price: 30000, dur: 120, res: 28, req: {'Dây Nano':20, 'Lưỡi Câu Bạc':10, 'Máy Câu Thường':5} },
+    '🎣 Cần River King': { price: 40000, dur: 135, res: 30, req: {'Dây Nano':25, 'Lưỡi Câu Bạc':15, 'Phao Carbon':10} },
+    '🎣 Cần Sea Hunter': { price: 50000, dur: 150, res: 35, req: {'Dây Titan':30, 'Lưỡi Câu Vàng':20, 'Máy Câu Chuyên Nghiệp':10} },
+    '🔱 Cần Titan': { price: 120000, dur: 200, res: 45, req: {'Dây Titan':50, 'Lưỡi Câu Titan':25, 'Máy Câu Carbon':10} },  
+    '🔱 Cần Long Vương': { price: 250000, dur: 250, res: 55, req: {'Vảy Rồng':10, 'Dây Titan':50, 'Phao Hải Thần':20} },  
+    '🔱 Cần Hải Thần': { price: 350000, dur: 300, res: 60, req: {'Ngọc Đại Dương':20, 'Mồi Thần Biển':10, 'Dây Titan':50} },  
+    '🔱 Cần Kraken': { price: 500000, dur: 350, res: 68, req: {'Xúc Tu Kraken':15, 'Dây Thiên Hà':30, 'Lưỡi Câu Poseidon':20} },  
+    '🔱 Cần Ngân Hà': { price: 750000, dur: 450, res: 72, req: {'Đá Thiên Hà':50, 'Lõi Vũ Trụ':20, 'Dây Thiên Hà':30} },  
+    '✨ Cần Poseidon': { price: 800000, dur: 500, res: 75, req: {'Ngọc Poseidon':25, 'Xúc Tu Kraken':20, 'Cá Thần Biển':10} },  
+    '✨ Cần Leviathan': { price: 1500000, dur: 700, res: 80, req: {'Vảy Leviathan':30, 'Răng Megalodon':10, 'Tim Thủy Quái':5} },  
+    '✨ Cần Atlantis': { price: 2200000, dur: 850, res: 82, req: {'Cổ Vật Atlantis':50, 'Ngọc Đại Dương':20, 'Cá Đại Dương Cổ Đại':10} },  
+    '✨ Cần Hải Đế': { price: 2600000, dur: 900, res: 84, req: {'Ngọc Poseidon':50, 'Vảy Leviathan':30, 'Thần Ngư Poseidon':10} },  
+    '✨ Cần Thiên Long': { price: 3000000, dur: 1000, res: 85, req: {'Vảy Rồng':50, 'Cá Thiên Long':20, 'Cá Hắc Long':10} },  
+    '🌌 Cần Thần Long': { price: 5000000, dur: 1500, res: 90, req: {'Vảy Rồng':100, 'Tinh Thể Thiên Hà':50, 'Cá Thiên Long':20} },  
+    '🌌 Cần Vũ Trụ': { price: 8000000, dur: 1800, res: 91, req: {'Lõi Vũ Trụ':50, 'Cá Vũ Trụ':30, 'Đá Thiên Hà':20} },  
+    '🌌 Cần Hỗn Mang': { price: 12000000, dur: 2200, res: 92, req: {'Mảnh Hỗn Mang':50, 'Cá Hỗn Mang':20, 'Cá Vương Giả':10} },  
+    '🌌 Cần Thiên Giới': { price: 16000000, dur: 3000, res: 94, req: {'Tinh Thể Thiên Hà':100, 'Cá Thiên Sứ':50, 'Cá Ánh Trăng':25} },  
+    '🌌 Cần Sáng Thế': { price: 20000000, dur: 5000, res: 95, req: {'Cá Sáng Thế':1, 'Lõi Vũ Trụ':100, 'Tinh Thể Thiên Hà':100} },   
+    '☄️ Cần Void': { price: 50000000, dur: 7000, res: 96, req: {'Mảnh Void':50, 'Cá Void':10, 'Cthulhu':5} },  
+    '☄️ Cần Origin': { price: 100000000, dur: 9000, res: 97, req: {'Tinh Thể Origin':50, 'Cá Origin':10, 'Leviathan':5} },  
+    '☄️ Cần Entity': { price: 250000000, dur: 12000, res: 98, req: {'Lõi Entity':50, 'Cá Entity':10, 'Kraken Hư Không':5} },  
+    '☄️ Cần Null': { price: 500000000, dur: 15000, res: 99, req: {'Mảnh Null':50, 'Cá Null':10, 'Leviathan Tận Thế':5} },  
+    '☄️ Cần Omega': { price: 1000000000, dur: 25000, res: 99, req: {'Mảnh Void':100, 'Tinh Thể Origin':100, 'Lõi Entity':100, 'Mảnh Null':100, 'Cá Omega':10, 'Leviathan Tận Thế':1} }
+};
+
+const ZONES = {
+    'Ao Làng': { fee: 0, level: 1, maxRarity: 'Rare' }, 'Sông Lớn': { fee: 100000, level: 10, maxRarity: 'Epic' }, 'Hồ Bí Ẩn': { fee: 1000000, level: 25, maxRarity: 'Legendary' },
+    'Biển Đông': { fee: 10000000, level: 50, maxRarity: 'Mythic' }, 'Rãnh Đại Dương': { fee: 100000000, level: 80, maxRarity: 'Secret' },
+    'Atlantis': { fee: 1000000000, level: 100, maxRarity: 'Secret' }, 'Hư Không': { fee: 10000000000, level: 150, maxRarity: 'Secret' }
+};
+
+const RANK_VAL = { 'Uncommon': 1, 'Rare': 2, 'Epic': 3, 'Legendary': 4, 'Mythic': 5, 'Secret': 6 };
+
+const BAIT_BUFFS = {
+    "Trùn Đất": { target: 'Uncommon', bonus: 0 }, "Tôm Nhỏ": { target: 'Rare', bonus: 5 }, "Cá Con": { target: 'Rare', bonus: 10 },
+    "Mồi Tổng Hợp": { target: 'Epic', bonus: 15 }, "Mồi Phát Sáng": { target: 'Epic', bonus: 20 }, "Mồi Đại Dương": { target: 'Legendary', bonus: 30 },
+    "Mồi Huyền Thoại": { target: 'Mythic', bonus: 50 }, "Mồi Thần Biển": { target: 'Secret', bonus: 75 }
+};
+
+const FISH_DATA = {
+    Uncommon: { chance: 50, minPrice: 30000, maxPrice: 150000, breakChance: 10, list: ['Cá Lóc Đồng', 'Cá Tra', 'Cá Rô Phi', 'Cá Rô Đồng', 'Cá Trê Lai', 'Cá Trê Trắng', 'Cá Trê Vàng', 'Cá Basa', 'Cá Trắm Cỏ', 'Cá Tai Tượng', 'Cá Chim Trắng', 'Cá Diêu Hồng', 'Cá Leo', 'Cá Chạch', 'Cá Thát Lát', 'Cá Bống Tượng', 'Cá Sặc Rằn', 'Cá Mè Hoa', 'Cá Chốt', 'Cá Ngát', 'Cá He', 'Cá Dứa', 'Cá Măng Sữa', 'Cá Nàng Hai', 'Cá Chày'], drops: ['Vảy Rồng', 'Ngọc Đại Dương'] },
+    Rare: { chance: 25, minPrice: 150000, maxPrice: 500000, breakChance: 30, list: ['Cá Hô', 'Cá Vồ Đém', 'Cá Chình', 'Cá Ngạnh', 'Cá Nheo', 'Cá Koi', 'Cá Tầm', 'Cá Măng', 'Cá Anh Vũ', 'Cá Bông Lau Khổng Lồ', 'Cá Hồi', 'Cá Tầm Siberia', 'Cá Chép Kính', 'Cá Chình Điện', 'Cá Hổ Sông'], drops: ['Xúc Tu Kraken', 'Cổ Vật Atlantis'] },
+    Epic: { chance: 15, minPrice: 500000, maxPrice: 2000000, breakChance: 50, list: ['Cá Rồng Đỏ', 'Cá Kiếm', 'Cá Ngừ Đại Dương', 'Cá Thu Hoàng Kim', 'Cá Mập Con', 'Cá Đuối Khổng Lồ', 'Cá Cờ Xanh', 'Cá Mặt Quỷ', 'Cá Hổ Biển', 'Cá Kình Non', 'Cá Hổ Vàng', 'Cá Rồng Bạc'], drops: ['Đá Thiên Hà', 'Lõi Vũ Trụ'] },
+    Legendary: { chance: 8, minPrice: 2000000, maxPrice: 20000000, breakChance: 70, list: ['Cá Rồng Vàng', 'Cá Mập Trắng', 'Cá Hỏa Long', 'Cá Băng Long', 'Cá Đại Dương Cổ Đại', 'Cá Thiên Hà', 'Cá Hư Không', 'Cá Hoàng Gia', 'Cá Pha Lê', 'Cá Ngọc Bích', 'Cá Thần Sấm', 'Cá Thần Gió'], drops: ['Ngọc Poseidon', 'Răng Megalodon', 'Tim Thủy Quái'] },
+    Mythic: { chance: 1.9, minPrice: 20000000, maxPrice: 200000000, breakChance: 85, list: ['Cá Koi Vàng', 'Cá Rồng Bạch Kim', 'Cá Mập Búa', 'Cá Ngọc Trai', 'Cá Hoàng Kim', 'Cá Kim Cương', 'Cá Ánh Trăng', 'Cá Mặt Trời', 'Cá Thiên Sứ', 'Cá Bóng Tối', 'Cá Hắc Long', 'Cá Thiên Long', 'Cá Ngân Hà', 'Cá Hỗn Mang', 'Cá Vương Giả'], drops: ['Vảy Leviathan', 'Tinh Thể Thiên Hà', 'Mảnh Hỗn Mang'] },
+    Secret: { chance: 0.1, minPrice: 500000000, maxPrice: 100000000000, breakChance: 95, list: ['Cá Vũ Trụ', 'Kraken', 'Megalodon', 'Jormungandr', 'Cá Sáng Thế', 'Cá Tận Thế', 'Hắc Long Vương', 'Cá Void', 'Cá Origin', 'Cá Entity', 'Cá Null', 'Cthulhu', 'Titan Đại Dương', 'Quái Ngư Abyss', 'Rồng Biển Cổ Đại', 'Thần Ngư Poseidon', 'Leviathan', 'Leviathan Tận Thế', 'Kraken Hư Không', 'Cá Omega'], drops: ['Mảnh Void', 'Tinh Thể Origin', 'Lõi Entity', 'Mảnh Null'] }
+};
+
+// ==========================================
+// 2. KHỞI TẠO BOT & LỆNH SLASH
+// ==========================================
+client.once('ready', async () => {
+    console.log(`🎣 Bot Câu Cá Sinh Thái đã sẵn sàng: ${client.user.tag}`);
+    try {
+        await client.application.commands.set([
+            { name: 'nangcap', description: 'Nâng cấp chỉ số cần câu (+1, +2...)', options: [] },
+            { name: 'update', description: 'Lò rèn: Chế tạo/Tiến hóa Cần Câu (Cần có nguyên liệu)', options: [] },
+            {
+                name: 'buff', description: 'Lệnh Admin: Buff tiền ẩn danh cho Member',
+                options: [
+                    { name: 'user', description: 'Chọn người nhận', type: ApplicationCommandOptionType.User, required: true },
+                    { name: 'money', description: 'Số tiền cấp', type: ApplicationCommandOptionType.Integer, required: true }
+                ]
+            },
+            {
+                name: 'give', description: 'Lệnh Member: Chuyển tiền cho người khác',
+                options: [
+                    { name: 'user', description: 'Chọn người nhận', type: ApplicationCommandOptionType.User, required: true },
+                    { name: 'money', description: 'Số tiền chuyển', type: ApplicationCommandOptionType.Integer, required: true }
+                ]
+            },
+            {
+                name: 'rest', description: 'Lệnh Admin: Thu hồi nợ/tịch thu tiền của Member',
+                options: [
+                    { name: 'user', description: 'Người bị thu hồi', type: ApplicationCommandOptionType.User, required: true },
+                    { name: 'money', description: 'Số tiền thu', type: ApplicationCommandOptionType.Integer, required: true }
+                ]
+            },
+            {
+                name: 'broadcast', description: 'Lệnh Admin: Trợ cấp tiền đồng loạt theo Role',
+                options: [
+                    { name: 'role', description: 'Role nhận tiền', type: ApplicationCommandOptionType.Role, required: true },
+                    { name: 'money', description: 'Số tiền trợ cấp', type: ApplicationCommandOptionType.Integer, required: true }
+                ]
+            }
+        ]);
+    } catch (e) { console.error(e); }
+});
+
+// ==========================================
+// 3. HỆ THỐNG LỆNH TIN NHẮN BÌNH THƯỜNG (!)
+// ==========================================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    const userId = message.author.id;
+    const user = getUser(userId);
+
+    if (Date.now() - user.lastChatMoney >= 240000) {
+        user.lastChatMoney = Date.now();
+        user.balance += 15;
+        saveData();
+    }
+
+    if (command === 'diemdanh') {
+        if (Date.now() - user.lastDaily < 86400000) return message.reply('⏰ Bạn đã nhận trợ cấp hôm nay rồi, ngày mai quay lại nhé!');
+        user.lastDaily = Date.now();
+        user.balance += 200;
+        saveData();
+        return message.reply(`🎉 **${message.author.username}** điểm danh thành công nhận **200 VNĐ 💸**!`);
+    }
+
+    if (command === 'vi' || command === 'money') {
+        return message.reply(`👛 Số dư hiện tại của bạn: **${user.balance.toLocaleString()} VNĐ 💸**`);
+    }
+
+    if (command === 'xephang' || command === 'top') {
+        // 1. Lấy danh sách thành viên của server hiện tại
+        let guildMembers;
+        try {
+            // Dùng fetch để lấy danh sách đầy đủ (kể cả thành viên offline)
+            guildMembers = await message.guild.members.fetch();
+        } catch (err) {
+            // Nếu gặp lỗi (ví dụ chưa bật Intent), dùng dữ liệu có sẵn trong cache
+            guildMembers = message.guild.members.cache;
+        }
+
+        // 2. Lọc DB: Chỉ lấy những User ID có mặt trong server này, sau đó sắp xếp giảm dần
+        const sorted = Object.entries(db.users)
+            .filter(([userId]) => guildMembers.has(userId))
+            .sort((a, b) => b[1].balance - a[1].balance)
+            .slice(0, 10);
+
+        // 3. Hiển thị thông báo
+        let desc = sorted.length === 0 ? 'Chưa có ai trong server này.' : sorted.map((entry, idx) => {
+            let medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🏅';
+            return `${medal} **Top ${idx + 1}:** <@${entry[0]}> \`${entry[1].balance.toLocaleString()} VNĐ 💸\``;
+        }).join('\n\n');
+
+        const embed = new EmbedBuilder()
+            .setColor('#f1c40f')
+            // Thêm tên của server vào tiêu đề để dễ nhận biết
+            .setTitle(`🏆 BẢNG XẾP HẠNG ĐẠI GIA - ${message.guild.name.toUpperCase()}`)
+            .setDescription(desc);
+            
+        return message.reply({ embeds: [embed] });
+    }
+
+    // [SHOP LINH KIỆN & RƯƠNG]
+    if (command === 'shoplinhkien') {
+        const buildMenu = (id, placeholder, items) => {
+            return new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder().setCustomId(id).setPlaceholder(placeholder)
+                .addOptions(Object.entries(items).map(([k, v]) => 
+                    new StringSelectMenuOptionBuilder().setLabel(k).setDescription(`Giá: ${v.toLocaleString()} VNĐ`).setValue(`buy_${k}`)
+                ).slice(0, 25))
+            );
+        };
+        const row1 = buildMenu('menu_linhkien_1', '🧵 Chọn Dây Câu & 🪝 Lưỡi Câu', {...COMPONENTS.lines, ...COMPONENTS.hooks});
+        const row2 = buildMenu('menu_linhkien_2', '🎈 Chọn Phao & ⚙️ Máy Câu', {...COMPONENTS.floats, ...COMPONENTS.reels});
+        const row3 = buildMenu('menu_linhkien_3', '🪱 Chọn Mồi & 💊 Buff', {...COMPONENTS.baits, ...COMPONENTS.buffs});
+        
+        const ruongOptions = [
+            new StringSelectMenuOptionBuilder().setLabel('Rương Nhỏ (+50 slots)').setDescription('Giá: 500,000 VNĐ').setValue('buy_ruong_50'),
+            new StringSelectMenuOptionBuilder().setLabel('Rương Vừa (+100 slots)').setDescription('Giá: 2,000,000 VNĐ').setValue('buy_ruong_100'),
+            new StringSelectMenuOptionBuilder().setLabel('Rương Lớn (+200 slots)').setDescription('Giá: 10,000,000 VNĐ').setValue('buy_ruong_200')
+        ];
+        const row4 = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('menu_ruong').setPlaceholder('📦 Nâng cấp & Mở Rộng Túi Đồ').addOptions(ruongOptions)
+        );
+        
+        return message.reply({ content: '🛠️ **CỬA HÀNG LINH KIỆN & TÚI ĐỒ**\nNhấp vào các danh sách để mua trực tiếp:', components: [row1, row2, row3, row4] });
+    }
+
+    // [SHOP MUA CẦN CÂU BẰNG TIỀN]
+    if (command === 'shopcan') {
+        const embed = new EmbedBuilder().setColor('#f1c40f').setTitle('🏪 TẠP HÓA CẦN CÂU (MUA BẰNG TIỀN)');
+        let desc = 'Đây là cửa hàng mua cần câu nhanh chóng bằng VNĐ.\n⚠️ **Lưu ý:** Mua xong sẽ vứt bỏ cần đang sử dụng và trang bị ngay lập tức cần mới!\n\n';
+        const options = [];
+
+        for (const [name, stats] of Object.entries(RODS)) {
+            if (stats.price === 0) continue;
+            desc += `**${name}**\n• Giá mua: ${stats.price.toLocaleString()} VNĐ 💸 | Độ bền: ${stats.dur} | Lực kéo: ${stats.res}\n`;
+            if (options.length < 25) {
+                options.push(new StringSelectMenuOptionBuilder()
+                    .setLabel(name.substring(0, 100))
+                    .setDescription(`Lực kéo: ${stats.res} | Mua: ${stats.price.toLocaleString()} VNĐ`)
+                    .setValue(`buyrod_${name}`)
+                );
+            }
+        }
+        embed.setDescription(desc.substring(0, 4000));
+        const selectMenu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('menu_shopcan_buy').setPlaceholder('🛒 Chọn cần câu muốn MUA NGAY').addOptions(options)
+        );
+        return message.reply({ embeds: [embed], components: [selectMenu] });
+    }
+
+    if (command === 'khuvuc' || command === 'doikhuvuccau') {
+        const options = Object.entries(ZONES).map(([k, v]) => 
+            new StringSelectMenuOptionBuilder().setLabel(k).setDescription(`Yêu cầu Lv: ${v.level} | Phí: ${v.fee.toLocaleString()} VNĐ`).setValue(`zone_${k}`)
+        );
+        const selectMenu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('menu_doikhuvuc').setPlaceholder('🗺️ Chọn vùng biển muốn ra khơi!').addOptions(options.slice(0, 25))
+        );
+        return message.reply({ content: '🚤 **BẾN TÀU DI CHUYỂN**\nChọn khu vực bạn muốn cập bến từ danh sách:', components: [selectMenu] });
+    }
+
+    // ==========================================
+    // KHO ĐỒ & MENU CHỌN NHIỀU TRANG BỊ CÙNG LÚC
+    // ==========================================
+    if (command === 'kho' || command === 'profile') {
+        const embed = new EmbedBuilder().setColor('#2f3136').setTitle(`🎒 HỒ SƠ & TÚI ĐỒ: ${message.author.username}`);
+        let equipStr = `🎣 Cần: **${user.equip.rod} (+${user.equip.rodPlus})** [Bền: ${user.equip.dur}/${RODS[user.equip.rod].dur}]\n🧵 Dây: **${user.equip.line || 'Trống'}**\n🪝 Lưỡi: **${user.equip.hook || 'Trống'}**\n🎈 Phao: **${user.equip.float || 'Trống'}**\n⚙️ Máy: **${user.equip.reel || 'Trống'}**\n🪱 Mồi: **${user.equip.bait || 'Trống'}** (Trong kho: ${user.inventory[user.equip.bait] || 0} mồi)`;
+        let invStr = Object.entries(user.inventory).map(([k, v]) => `• ${k}: x${v}`).join('\n');
+        if (!invStr) invStr = '*Túi đồ trống không.*';
+        
+        embed.addFields(
+            { name: '👤 Cấp Độ & Tiền', value: `Cấp độ: **${user.level}** (EXP: ${user.exp})\nTài sản: **${user.balance.toLocaleString()} VNĐ 💸**\nKhu Vực Hiện Tại: **${user.zone}**`, inline: false },
+            { name: '🛠️ Tình Trạng Trang Bị', value: equipStr, inline: false },
+            { name: `📦 Kho Đồ Lưu Trữ (${Object.keys(user.inventory).length}/${user.maxInv})`, value: invStr.substring(0, 1024), inline: false }
+        );
+
+        // Lọc ra các Linh Kiện mà user ĐANG CÓ trong kho
+        const equipableItems = Object.keys(user.inventory).filter(item => 
+            COMPONENTS.lines[item] || COMPONENTS.hooks[item] || 
+            COMPONENTS.floats[item] || COMPONENTS.reels[item] || 
+            COMPONENTS.baits[item]
+        ).slice(0, 25);
+
+        const componentsArr = [];
+
+        // Nếu có linh kiện, tạo Select Menu cho phép chọn nhiều mục
+        if (equipableItems.length > 0) {
+            const options = equipableItems.map(item => {
+                let icon = '📦';
+                if (COMPONENTS.lines[item]) icon = '🧵';
+                if (COMPONENTS.hooks[item]) icon = '🪝';
+                if (COMPONENTS.floats[item]) icon = '🎈';
+                if (COMPONENTS.reels[item]) icon = '⚙️';
+                if (COMPONENTS.baits[item]) icon = '🪱';
+                
+                return new StringSelectMenuOptionBuilder()
+                    .setLabel(`${icon} ${item}`)
+                    .setDescription(`Đang có: ${user.inventory[item]} cái`)
+                    .setValue(`equip_${item}`);
+            });
+
+            const selectMenu = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('menu_trangbi')
+                    .setPlaceholder('🎒 Click để mang trang bị (Tick nhiều mục cùng lúc)')
+                    .setMinValues(1) // Cho phép tick ít nhất 1 ô
+                    .setMaxValues(Math.min(equipableItems.length, 5)) // Tick tối đa 5 linh kiện cùng lúc
+                    .addOptions(options)
+            );
+            componentsArr.push(selectMenu);
+        }
+
+        return message.reply({ embeds: [embed], components: componentsArr });
+    }
+
+    if (command === 'suacan') {
+        const rodData = RODS[user.equip.rod];
+        if (user.equip.dur >= rodData.dur) return message.reply('✨ Cần câu của bạn vẫn nguyên vẹn!');
+        const missing = rodData.dur - user.equip.dur;
+        let fixCost = Math.floor(rodData.price * 0.15 * (missing / rodData.dur));
+        if (fixCost === 0 && missing > 0) fixCost = 500;
+
+        if (user.balance < fixCost) return message.reply(`❌ Bạn cần **${fixCost.toLocaleString()} VNĐ 💸** để bảo trì!`);
+        user.balance -= fixCost;
+        user.equip.dur = rodData.dur;
+        saveData();
+        return message.reply(`🔧 Đã nhờ thợ rèn bảo dưỡng cần **${user.equip.rod}** với chi phí **${fixCost.toLocaleString()} VNĐ 💸**!`);
+    }
+
+    if (command === 'banca') {
+        let totalEarned = 0; let log = []; let allFishes = {};
+        for (let r in FISH_DATA) { FISH_DATA[r].list.forEach(f => { allFishes[f] = FISH_DATA[r]; }); }
+
+        for (let [item, qty] of Object.entries(user.inventory)) {
+            if (allFishes[item]) {
+                let minP = allFishes[item].minPrice; let maxP = allFishes[item].maxPrice;
+                let fishTotal = 0;
+                for(let i = 0; i < qty; i++) fishTotal += Math.floor(Math.random() * (maxP - minP + 1)) + minP;
+                totalEarned += fishTotal;
+                log.push(`• Bán ${qty}x ${item}: **${fishTotal.toLocaleString()} VNĐ 💸**`);
+                delete user.inventory[item];
+            }
+        }
+        if (totalEarned === 0) return message.reply('❌ Giỏ cá trống không, lấy gì mà bán!');
+        user.balance += totalEarned;
+        saveData();
+        const embed = new EmbedBuilder().setColor('#2ecc71').setTitle('💰 HÓA ĐƠN THU MUA HẢI SẢN').setDescription(log.join('\n') + `\n\n**Tổng thu nhập bán cá:** \`${totalEarned.toLocaleString()} VNĐ 💸\``);
+        return message.reply({ embeds: [embed] });
+    }
+
+    if (command === 'cauca' || command === 'fish') {
+        if (user.equip.dur <= 0) return message.reply('❌ Cần câu của bạn đã gãy! Hãy dùng `!suacan` để bảo trì.');
+        if (!user.equip.line) return message.reply('❌ Cần câu chưa móc Dây Câu!');
+        if (!user.equip.hook) return message.reply('❌ Cần câu chưa gắn Lưỡi Câu!');
+        if (!user.equip.bait) return message.reply('❌ Bạn không thể thả câu chay mà không có Mồi!');
+        if (!user.inventory[user.equip.bait] || user.inventory[user.equip.bait] <= 0) {
+            user.equip.bait = null; saveData(); return message.reply('❌ Mồi đã dùng hết sạch, hãy ghé shop mua thêm!');
+        }
+
+        user.inventory[user.equip.bait] -= 1;
+        if (user.inventory[user.equip.bait] <= 0) delete user.inventory[user.equip.bait];
+        user.equip.dur -= 1;
+
+        const rodStats = RODS[user.equip.rod];
+        const baitInfo = BAIT_BUFFS[user.equip.bait];
+        const hasLuck = user.buffs.luck > Date.now();
+        const hasDropBuff = user.buffs.drop > Date.now();
+
+        let chances = { Uncommon: 50, Rare: 25, Epic: 15, Legendary: 8, Mythic: 1.9, Secret: 0.1 };
+        if (baitInfo && baitInfo.bonus > 0 && baitInfo.target) {
+            if (user.equip.bait === "Mồi Thần Biển") { chances.Mythic += 35; chances.Secret += 40; } 
+            else { chances[baitInfo.target] += baitInfo.bonus; }
+        }
+        if (hasLuck) { chances.Mythic += 20; chances.Secret += 10; chances.Legendary += 30; }
+
+        let rarity = 'Uncommon';
+        let roll = Math.random() * Object.values(chances).reduce((a, b) => a + b, 0);
+        
+        if (roll <= chances.Secret) rarity = 'Secret';
+        else if (roll <= chances.Secret + chances.Mythic) rarity = 'Mythic';
+        else if (roll <= chances.Secret + chances.Mythic + chances.Legendary) rarity = 'Legendary';
+        else if (roll <= chances.Secret + chances.Mythic + chances.Legendary + chances.Epic) rarity = 'Epic';
+        else if (roll <= chances.Secret + chances.Mythic + chances.Legendary + chances.Epic + chances.Rare) rarity = 'Rare';
+        else rarity = 'Uncommon';
+
+        const zoneMaxRarity = ZONES[user.zone].maxRarity;
+        if (RANK_VAL[rarity] > RANK_VAL[zoneMaxRarity]) rarity = zoneMaxRarity;
+
+        const fishCategory = FISH_DATA[rarity];
+        const fishName = fishCategory.list[Math.floor(Math.random() * fishCategory.list.length)];
+        let catchPower = rodStats.res + (user.equip.rodPlus * 2);
+        let finalBreakChance = Math.max(4, Math.min(95, fishCategory.breakChance - catchPower));
+
+        let breakText = ''; let caughtText = '';
+        if (Math.random() * 100 < finalBreakChance) {
+            breakText = `💥 Căng quá!! Cá quá khỏe làm đứt **${user.equip.line}** của bạn!`;
+            user.equip.line = null;
+            if (Math.random() < 0.5) { breakText += ` Bay màu luôn **${user.equip.hook}**!`; user.equip.hook = null; }
+        } else {
+            caughtText = `🎉 Đớp mồi rồi!! Kéo thành công **1x ${fishName}** [${rarity}].`;
+            if (Math.random() * 100 < (hasDropBuff ? 60 : 15)) {
+                let dropItem = fishCategory.drops[Math.floor(Math.random() * fishCategory.drops.length)];
+                caughtText += `\n🎁 Quái ngư nhả ra: **1x ${dropItem}** (Nguyên liệu chế đồ).`;
+                if (!user.inventory[dropItem] && Object.keys(user.inventory).length >= user.maxInv) {
+                    caughtText += `\n⚠️ Kho đồ ĐẦY, đành vứt lại nguyên liệu này!`;
+                } else { user.inventory[dropItem] = (user.inventory[dropItem] || 0) + 1; }
+            }
+
+            if (!user.inventory[fishName] && Object.keys(user.inventory).length >= user.maxInv) {
+                caughtText += `\n⚠️ Túi đồ ĐẦY! Đành thả con cá này về biển...`;
+            } else {
+                user.inventory[fishName] = (user.inventory[fishName] || 0) + 1;
+                user.exp += Math.floor(Math.random() * 20) + 10;
+            }
+        }
+
+        if (user.equip.dur <= 0) breakText += `\n⚠️ **RẮC RẮC!** Cần câu đã cạn độ bền và nát bươm!`;
+        let levelUpText = '';
+        if (user.exp >= user.level * 100) {
+            user.level += 1; user.exp = 0;
+            levelUpText = `\n🌟 **TUYỆT VỜI! LÊN CẤP!** Kỹ năng câu cá đạt Level **${user.level}**.`;
+        }
+        saveData();
+
+        const embed = new EmbedBuilder().setColor(breakText ? '#e74c3c' : '#3498db').setTitle(`🎣 ${message.author.username} đang quăng cần tại ${user.zone}...`).setDescription(`${caughtText}${breakText}${levelUpText}\n\n*(Cần bền: ${user.equip.dur}/${rodStats.dur})*`);
+        return message.reply({ embeds: [embed] });
+    }
+});
+
+// ==========================================
+// 4. XỬ LÝ SỰ KIỆN MENU & LỆNH SLASH TƯƠNG TÁC
+// ==========================================
+client.on('interactionCreate', async (interaction) => {
+    const userId = interaction.user.id;
+    const user = getUser(userId);
+
+    // XỬ LÝ SUBMIT MODAL KHI MUA ĐỒ
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('modal_buy_')) {
+            const itemName = interaction.customId.replace('modal_buy_', '');
+            const rawQuantity = interaction.fields.getTextInputValue('quantity');
+            const quantity = parseInt(rawQuantity);
+
+            if (isNaN(quantity) || quantity <= 0) {
+                return interaction.reply({ content: '❌ Số lượng nhập không hợp lệ!', ephemeral: true });
+            }
+
+            let price = 0;
+            for (let cat of Object.values(COMPONENTS)) { if (cat[itemName]) price = cat[itemName]; }
+
+            const totalPrice = price * quantity;
+
+            if (user.balance < totalPrice) {
+                return interaction.reply({ content: `❌ Bạn cần **${totalPrice.toLocaleString()} VNĐ** để mua ${quantity}x ${itemName}!`, ephemeral: true });
+            }
+            
+            // Check giới hạn rương đồ nếu món đồ đó chưa tồn tại trong túi
+            if (!user.inventory[itemName] && Object.keys(user.inventory).length >= user.maxInv) {
+                return interaction.reply({ content: '🎒 Kho đồ của bạn đã ĐẦY!', ephemeral: true });
+            }
+
+            user.balance -= totalPrice;
+            user.inventory[itemName] = (user.inventory[itemName] || 0) + quantity;
+            
+            if (itemName === 'Bùa May Mắn' || itemName === 'Thuốc Rớt Đồ') {
+                const buffType = itemName === 'Bùa May Mắn' ? 'luck' : 'drop';
+                if (user.buffs[buffType] < Date.now()) user.buffs[buffType] = Date.now();
+                user.buffs[buffType] += 3600000 * quantity;
+                user.inventory[itemName] -= quantity;
+                if (user.inventory[itemName] <= 0) delete user.inventory[itemName];
+            }
+            
+            saveData();
+            return interaction.reply({ content: `✅ Mua thành công **${quantity}x ${itemName}** với tổng giá **${totalPrice.toLocaleString()} VNĐ**!`, ephemeral: true });
+        }
+    }
+
+    // XỬ LÝ CLICK MENU DANH SÁCH CHỌN
+    if (interaction.isStringSelectMenu()) {
+
+        // TRANG BỊ LINH KIỆN (TICK NHIỀU Ô)
+        if (interaction.customId === 'menu_trangbi') {
+            const items = interaction.values.map(v => v.replace('equip_', ''));
+            let equippedLog = [];
+
+            for (const item of items) {
+                // Đảm bảo trong kho vẫn còn vật phẩm
+                if (!user.inventory[item] || user.inventory[item] <= 0) continue;
+
+                let type = null;
+                if (COMPONENTS.lines[item]) type = 'line';
+                if (COMPONENTS.hooks[item]) type = 'hook';
+                if (COMPONENTS.floats[item]) type = 'float';
+                if (COMPONENTS.reels[item]) type = 'reel';
+                if (COMPONENTS.baits[item]) type = 'bait';
+
+                if (!type) continue;
+
+                // Trả linh kiện đang gắn trên cần về lại túi đồ (trừ Mồi)
+                if (user.equip[type] && type !== 'bait') {
+                    user.inventory[user.equip[type]] = (user.inventory[user.equip[type]] || 0) + 1;
+                }
+
+                // Gắn linh kiện mới vào cần
+                user.equip[type] = item;
+                if (type !== 'bait') { 
+                    user.inventory[item] -= 1;
+                    if (user.inventory[item] <= 0) delete user.inventory[item];
+                }
+                
+                equippedLog.push(`**${item}**`);
+            }
+
+            saveData();
+            return interaction.reply({ content: `✅ Bạn đã lắp thành công các trang bị sau vào cần câu:\n${equippedLog.join(', ')}`, ephemeral: true });
+        }
+                
+        // MUA LINH KIỆN HIỂN THỊ MODAL THAY VÌ MUA TRỰC TIẾP
+        if (interaction.customId.startsWith('menu_linhkien')) {
+            const itemName = interaction.values[0].replace('buy_', '');
+            
+            const modal = new ModalBuilder()
+                .setCustomId(`modal_buy_${itemName}`)
+                .setTitle(`Mua ${itemName}`);
+
+            const quantityInput = new TextInputBuilder()
+                .setCustomId('quantity')
+                .setLabel('Nhập số lượng muốn mua:')
+                .setStyle(TextInputStyle.Short)
+                .setValue('1')
+                .setRequired(true);
+
+            const actionRow = new ActionRowBuilder().addComponents(quantityInput);
+            modal.addComponents(actionRow);
+
+            await interaction.showModal(modal);
+            return;
+        }
+
+        // MUA RƯƠNG
+        if (interaction.customId === 'menu_ruong') {
+            const type = interaction.values[0];
+            let price = 0; let addSlot = 0;
+            if (type === 'buy_ruong_50') { price = 500000; addSlot = 50; }
+            if (type === 'buy_ruong_100') { price = 2000000; addSlot = 100; }
+            if (type === 'buy_ruong_200') { price = 10000000; addSlot = 200; }
+
+            if (user.balance < price) return interaction.reply({ content: `❌ Bạn không đủ **${price.toLocaleString()} VNĐ** để mua Rương này!`, ephemeral: true });
+            
+            user.balance -= price;
+            user.maxInv += addSlot;
+            saveData();
+            return interaction.reply({ content: `✅ Nâng cấp thành công! Kho hiện tại chứa được tối đa **${user.maxInv}** slots.`, ephemeral: true });
+        }
+
+        // ĐỔI KHU VỰC
+        if (interaction.customId === 'menu_doikhuvuc') {
+            const zoneName = interaction.values[0].replace('zone_', '');
+            const zoneData = ZONES[zoneName];
+            
+            if (user.level < zoneData.level) return interaction.reply({ content: `❌ Bạn cần Level **${zoneData.level}** để ra ${zoneName}!`, ephemeral: true });
+            if (user.balance < zoneData.fee) return interaction.reply({ content: `❌ Bạn cần **${zoneData.fee.toLocaleString()} VNĐ** nộp phí bến bãi!`, ephemeral: true });
+            
+            user.balance -= zoneData.fee; user.zone = zoneName; saveData();
+            return interaction.reply({ content: `🚤 Căng buồm! Bạn đã di chuyển đến **${zoneName}**. Bắt đầu câu cá thôi!`, ephemeral: true });
+        }
+
+        // SHOP CẦN CÂU (MUA BẰNG TIỀN TRỰC TIẾP)
+        if (interaction.customId === 'menu_shopcan_buy') {
+            const rodName = interaction.values[0].replace('buyrod_', '');
+            const rodData = RODS[rodName];
+            
+            if (user.balance < rodData.price) return interaction.reply({ content: `❌ Bạn cần **${rodData.price.toLocaleString()} VNĐ** để tậu ${rodName}!`, ephemeral: true });
+            
+            user.balance -= rodData.price;
+            user.equip.rod = rodName; user.equip.rodPlus = 0; user.equip.dur = rodData.dur;
+            saveData();
+            return interaction.reply({ content: `✅ Bạn đã mua sắm và trang bị lập tức **${rodName}** với giá **${rodData.price.toLocaleString()} VNĐ**! Cần cũ đã bị vứt bỏ.`, ephemeral: true });
+        }
+
+        // UPDATE CẦN CÂU (CHẾ TẠO BẰNG NGUYÊN LIỆU LÒ RÈN)
+        if (interaction.customId === 'menu_update_rod') {
+            const rodName = interaction.values[0].replace('upgraderod_', '');
+            const targetRod = RODS[rodName];
+
+            let missingInfo = '';
+            for (const [mat, qty] of Object.entries(targetRod.req)) {
+                const has = user.inventory[mat] || 0;
+                if (has < qty) missingInfo += `• ${mat}: Đang có ${has}/${qty} cái\n`;
+            }
+
+            if (missingInfo !== '') {
+                const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('❌ KHÔNG ĐỦ NGUYÊN LIỆU').setDescription(`Để chế tạo **${rodName}**, kho đồ của bạn đang thiếu:\n${missingInfo}`);
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            for (const [mat, qty] of Object.entries(targetRod.req)) {
+                user.inventory[mat] -= qty;
+                if (user.inventory[mat] <= 0) delete user.inventory[mat];
+            }
+
+            user.equip.rod = rodName; user.equip.rodPlus = 0; user.equip.dur = targetRod.dur; 
+            saveData();
+            return interaction.reply({ content: `⚒️ Vang dội tiếng búa! Bạn đã rèn và tự động khoác lên người thần binh: 🎉 **${rodName}**!`, ephemeral: true });
+        }
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
+    // LỆNH UPDATE BẰNG UI LÒ RÈN
+    if (interaction.commandName === 'update') {
+        const options = [];
+        for (const [name, stats] of Object.entries(RODS)) {
+            if (!stats.req) continue;
+            if (options.length < 25) {
+                options.push(new StringSelectMenuOptionBuilder()
+                    .setLabel(name.substring(0, 100))
+                    .setDescription(`Độ bền: ${stats.dur} | Lực kéo: ${stats.res}`)
+                    .setValue(`upgraderod_${name}`)
+                );
+            }
+        }
+        const selectMenu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('menu_update_rod').setPlaceholder('⚒️ Chọn bản vẽ để tiến hành rèn đúc').addOptions(options)
+        );
+        return interaction.reply({ content: '⚒️ **LÒ RÈN CẦN CÂU (CHẾ TẠO BẰNG NGUYÊN LIỆU)**\nHãy chọn loại cần câu bạn muốn chế tạo (Nếu đủ đồ, thợ rèn sẽ chế ngay lập tức):', components: [selectMenu] });
+    }
+
+    // LỆNH THU HỒI TIỀN ADMIN
+    if (interaction.commandName === 'rest') {
+        if (interaction.user.id !== ADMIN_ID) return interaction.reply({ content: '❌ Chỉ Admin tối cao mới có quyền dùng lệnh này!', ephemeral: true });
+        const targetUser = interaction.options.getUser('user');
+        const amount = interaction.options.getInteger('money');
+        const tUser = getUser(targetUser.id);
+        
+        tUser.balance -= amount;
+        if (tUser.balance < 0) tUser.balance = 0; 
+        saveData();
+        return interaction.reply({ content: `🚓 **[THU HỒI TÀI SẢN]** Đã tịch thu **${amount.toLocaleString()} VNĐ** của <@${targetUser.id}>!\nSố dư còn lại của họ: \`${tUser.balance.toLocaleString()} VNĐ\`` });
+    }
+
+    // LỆNH BROADCAST PHÁT TIỀN CHO ROLE
+    if (interaction.commandName === 'broadcast') {
+        if (interaction.user.id !== ADMIN_ID) return interaction.reply({ content: '❌ Chỉ Admin tối cao mới có quyền dùng lệnh này!', ephemeral: true });
+        const targetRole = interaction.options.getRole('role');
+        const amount = interaction.options.getInteger('money');
+        
+        await interaction.deferReply(); 
+        
+        try {
+            const guildMembers = await interaction.guild.members.fetch();
+            const roleMembers = guildMembers.filter(m => m.roles.cache.has(targetRole.id) && !m.user.bot);
+            let count = 0;
+            
+            roleMembers.forEach(member => {
+                const u = getUser(member.id);
+                u.balance += amount;
+                count++;
+            });
+            saveData();
+            
+            return interaction.editReply({ content: `🎉 **[PHÚC LỢI SERVER]** Đã phát thành công gói trợ cấp **${amount.toLocaleString()} VNĐ** cho **${count}** thành viên sở hữu role **${targetRole.name}**!` });
+        } catch (e) {
+            return interaction.editReply({ content: `❌ Lỗi khi lấy danh sách thành viên! Hãy chắc chắn bạn đã bật "SERVER MEMBERS INTENT" trong Developer Portal. Chi tiết lỗi: ${e.message}` });
+        }
+    }
+
+    // LỆNH BUFF CŨ
+    if (interaction.commandName === 'buff') {
+        if (interaction.user.id !== ADMIN_ID) return interaction.reply({ content: '❌ Bạn không đủ thẩm quyền!', ephemeral: true });
+        const targetUser = interaction.options.getUser('user'); const amount = interaction.options.getInteger('money');
+        const tUser = getUser(targetUser.id);
+        tUser.balance += amount; saveData();
+        return interaction.reply({ content: `⚡ **[HỆ THỐNG ADMIN]** Đã buff ẩn danh **+${amount.toLocaleString()} VNĐ 💸** cho <@${targetUser.id}>.` });
+    }
+
+    // LỆNH CHUYỂN TIỀN
+    if (interaction.commandName === 'give') {
+        const targetUser = interaction.options.getUser('user'); const amount = interaction.options.getInteger('money');
+        const sUser = getUser(interaction.user.id); const tUser = getUser(targetUser.id);
+        if (amount <= 0 || sUser.balance < amount) return interaction.reply({ content: '❌ Bạn không đủ tiền hoặc số nhập không hợp lệ.', ephemeral: true });
+        if (interaction.user.id === targetUser.id) return interaction.reply({ content: '❌ Chuyển tiền cho bản thân làm gì vậy?', ephemeral: true });
+        
+        sUser.balance -= amount; tUser.balance += amount; saveData();
+        return interaction.reply({ content: `💸 Ngân Hàng: <@${interaction.user.id}> đã chuyển khoản thành công **${amount.toLocaleString()} VNĐ 💸** cho <@${targetUser.id}>!` });
+    }
+
+    // LỆNH CƯỜNG HÓA
+    if (interaction.commandName === 'nangcap') {
+        const currentPlus = user.equip.rodPlus;
+        const upgradeCost = 50000 + (currentPlus * 100000);
+        const failChance = Math.min(80, currentPlus * 10);
+        
+        if (user.balance < upgradeCost) return interaction.reply({ content: `❌ Phí bảo kê lò rèn để đập lên +${currentPlus + 1} là **${upgradeCost.toLocaleString()} VNĐ**. Bạn không đủ tiền!`, ephemeral: true });
+
+        user.balance -= upgradeCost;
+        if (Math.random() * 100 < failChance) {
+            let dropText = '';
+            if (currentPlus >= 3) { user.equip.rodPlus -= 1; dropText = `\n⚠️ Cần câu bị mẻ và giáng cấp xuống thành +${user.equip.rodPlus}.`; }
+            saveData();
+            return interaction.reply({ content: `💥 ẦM M... Bùm!! Cường hóa xịt. Tiêu hao **${upgradeCost.toLocaleString()} VNĐ** mà chẳng được gì.${dropText}` });
+        }
+
+        user.equip.rodPlus += 1; saveData();
+        return interaction.reply({ content: `✨ **TING TING! CƯỜNG HÓA THÀNH CÔNG!** Cần câu tỏa hào quang. Trạng thái hiện tại: **${user.equip.rod} (+${user.equip.rodPlus})**` });
+    }
+});
+
+client.login('Dán token');

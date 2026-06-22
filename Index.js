@@ -718,4 +718,4 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-client.login('Dán token');
+client.login(process.env.TOKEN);
